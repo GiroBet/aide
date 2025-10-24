@@ -135,8 +135,8 @@ impl GenContext {
         }
 
         let mut this = Self {
-            input_generator: SchemaGenerator::new(SchemaSettings::draft07().for_deserialize()),
-            output_generator: SchemaGenerator::new(SchemaSettings::draft07().for_serialize()),
+            input_generator: SchemaGenerator::new(SchemaSettings::openapi3().for_deserialize()),
+            output_generator: SchemaGenerator::new(SchemaSettings::openapi3().for_serialize()),
             infer_responses: true,
             all_error_responses: false,
             extract_schemas: true,
@@ -154,7 +154,7 @@ impl GenContext {
     fn set_extract_schemas(&mut self, extract: bool) {
         if extract {
             self.input_generator = SchemaGenerator::new(
-                SchemaSettings::draft07()
+                SchemaSettings::openapi3()
                     .with(|s| {
                         s.inline_subschemas = false;
                         s.definitions_path = "#/components/schemas/".into();
@@ -162,7 +162,7 @@ impl GenContext {
                     .for_deserialize(),
             );
             self.output_generator = SchemaGenerator::new(
-                SchemaSettings::draft07()
+                SchemaSettings::openapi3()
                     .with(|s| {
                         s.inline_subschemas = false;
                         s.definitions_path = "#/components/schemas/".into();
@@ -172,14 +172,14 @@ impl GenContext {
             self.extract_schemas = true;
         } else {
             self.input_generator = SchemaGenerator::new(
-                SchemaSettings::draft07()
+                SchemaSettings::openapi3()
                     .with(|s| {
                         s.inline_subschemas = true;
                     })
                     .for_deserialize(),
             );
             self.output_generator = SchemaGenerator::new(
-                SchemaSettings::draft07()
+                SchemaSettings::openapi3()
                     .with(|s| {
                         s.inline_subschemas = true;
                     })
