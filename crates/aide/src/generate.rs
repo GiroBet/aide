@@ -155,38 +155,18 @@ impl GenContext {
     }
     fn set_extract_schemas(&mut self, extract: bool) {
         if extract {
-            self.input_generator = SchemaGenerator::new(
-                SchemaSettings::openapi3()
-                    .with(|s| {
-                        s.inline_subschemas = false;
-                        s.definitions_path = "#/components/schemas/".into();
-                    })
-                    .for_deserialize(),
-            );
-            self.output_generator = SchemaGenerator::new(
-                SchemaSettings::openapi3()
-                    .with(|s| {
-                        s.inline_subschemas = false;
-                        s.definitions_path = "#/components/schemas/".into();
-                    })
-                    .for_serialize(),
-            );
+            let settings = SchemaSettings::openapi3();
+
+            self.input_generator = SchemaGenerator::new(settings.clone().for_deserialize());
+            self.output_generator = SchemaGenerator::new(settings.for_serialize());
             self.extract_schemas = true;
         } else {
-            self.input_generator = SchemaGenerator::new(
-                SchemaSettings::openapi3()
-                    .with(|s| {
-                        s.inline_subschemas = true;
-                    })
-                    .for_deserialize(),
-            );
-            self.output_generator = SchemaGenerator::new(
-                SchemaSettings::openapi3()
-                    .with(|s| {
-                        s.inline_subschemas = true;
-                    })
-                    .for_serialize(),
-            );
+            let settings = SchemaSettings::openapi3().with(|s| {
+                s.inline_subschemas = true;
+            });
+
+            self.input_generator = SchemaGenerator::new(settings.clone().for_deserialize());
+            self.output_generator = SchemaGenerator::new(settings.for_serialize());
             self.extract_schemas = false;
         }
     }
@@ -250,7 +230,7 @@ fn extract_schema_by_ref<'s>(
     match &schema_or_ref.as_object().and_then(|o| o.get("$ref")) {
         Some(Value::String(r)) => generator
             .definitions()
-            .get(r.strip_prefix("#/components/schemas/").unwrap_or(r))
+            .get(r.strip_prefix("/components/schemas/").unwrap_or(r))
             .and_then(|s| Into::<serde_json::Result<&Schema>>::into(s.try_into()).ok()),
         _ => None,
     }
