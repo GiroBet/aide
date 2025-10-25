@@ -230,7 +230,7 @@ fn extract_schema_by_ref<'s>(
     match &schema_or_ref.as_object().and_then(|o| o.get("$ref")) {
         Some(Value::String(r)) => generator
             .definitions()
-            .get(r.strip_prefix("/components/schemas/").unwrap_or(r))
+            .get(r.strip_prefix("#/components/schemas/").unwrap_or(r))
             .and_then(|s| Into::<serde_json::Result<&Schema>>::into(s.try_into()).ok()),
         _ => None,
     }
