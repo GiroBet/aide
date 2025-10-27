@@ -414,29 +414,32 @@ where
         <L::Service as Service<Request<Body>>>::Error: Into<Infallible> + 'static,
         <L::Service as Service<Request<Body>>>::Future: Send + 'static,
         L: OperationInput + 'static,
+        L: OperationOutput + 'static,
     {
         self.layer(layer)
             .with_path_items(|mut transform_path_item| {
                 let path_item = transform_path_item.inner_mut();
 
                 in_context(|ct| {
-                    macro_rules! apply_error {
+                    macro_rules! apply_operation {
                         ($op:ident) => {
                             if let Some(op) = path_item.$op.as_mut() {
                                 L::inferred_early_responses(ct, op);
                                 L::operation_input(ct, op);
+                                L::operation_response(ct, op);
+                                L::inferred_responses(ct, op);
                             };
                         };
                     }
 
-                    apply_error!(get);
-                    apply_error!(put);
-                    apply_error!(post);
-                    apply_error!(delete);
-                    apply_error!(options);
-                    apply_error!(head);
-                    apply_error!(patch);
-                    apply_error!(trace);
+                    apply_operation!(get);
+                    apply_operation!(put);
+                    apply_operation!(post);
+                    apply_operation!(delete);
+                    apply_operation!(options);
+                    apply_operation!(head);
+                    apply_operation!(patch);
+                    apply_operation!(trace);
                 });
 
                 transform_path_item
@@ -459,29 +462,32 @@ where
         <L::Service as Service<Request<Body>>>::Error: Into<Infallible> + 'static,
         <L::Service as Service<Request<Body>>>::Future: Send + 'static,
         L: OperationInput + 'static,
+        L: OperationOutput + 'static,
     {
         self.route_layer(layer)
             .with_path_items(|mut transform_path_item| {
                 let path_item = transform_path_item.inner_mut();
 
                 in_context(|ct| {
-                    macro_rules! apply_error {
+                    macro_rules! apply_operation {
                         ($op:ident) => {
                             if let Some(op) = path_item.$op.as_mut() {
                                 L::inferred_early_responses(ct, op);
                                 L::operation_input(ct, op);
+                                L::operation_response(ct, op);
+                                L::inferred_responses(ct, op);
                             };
                         };
                     }
 
-                    apply_error!(get);
-                    apply_error!(put);
-                    apply_error!(post);
-                    apply_error!(delete);
-                    apply_error!(options);
-                    apply_error!(head);
-                    apply_error!(patch);
-                    apply_error!(trace);
+                    apply_operation!(get);
+                    apply_operation!(put);
+                    apply_operation!(post);
+                    apply_operation!(delete);
+                    apply_operation!(options);
+                    apply_operation!(head);
+                    apply_operation!(patch);
+                    apply_operation!(trace);
                 });
 
                 transform_path_item
