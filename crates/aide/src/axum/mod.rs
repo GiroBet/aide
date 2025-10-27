@@ -400,9 +400,56 @@ where
         self
     }
 
-    /// Add a layer to all routes in this router and
-    /// include its effects in the API documentation.
+    /// Apply the `OperationInput` implementation of the provided layer
+    /// to all covered routes in this router.
+    ///
+    /// This is especially useful for layers such as for authentication, which
+    /// may return early responses (e.g., 401 Unauthorized) or modify operation inputs.
     pub fn api_layer<L>(self, layer: L) -> Self
+    where
+        L: Layer<Route> + Clone + Send + Sync + 'static,
+        L::Service: Service<Request<Body>> + Clone + Send + Sync + 'static,
+        <L::Service as Service<Request<Body>>>::Response: IntoResponse + 'static,
+        <L::Service as Service<Request<Body>>>::Error: Into<Infallible> + 'static,
+        <L::Service as Service<Request<Body>>>::Future: Send + 'static,
+        L: OperationInput + 'static,
+    {
+        self.layer(layer)
+            .with_path_items(|mut transform_path_item| {
+                let path_item = transform_path_item.inner_mut();
+
+                in_context(|ct| {
+                    macro_rules! apply_error {
+                        ($op:ident) => {
+                            if let Some(op) = path_item.$op.as_mut() {
+                                L::inferred_early_responses(ct, op);
+                                L::operation_input(ct, op);
+                            };
+                        };
+                    }
+
+                    apply_error!(get);
+                    apply_error!(put);
+                    apply_error!(post);
+                    apply_error!(delete);
+                    apply_error!(options);
+                    apply_error!(head);
+                    apply_error!(patch);
+                    apply_error!(trace);
+                });
+
+                transform_path_item
+            })
+    }
+
+    /// Apply the `OperationInput` implementation of the provided layer
+    /// to all covered routes in this router.
+    ///
+    /// This is especially useful for layers such as for authentication, which
+    /// may return early responses (e.g., 401 Unauthorized) or modify operation inputs.
+    ///
+    /// This is the `route_layer` equivalent of `api_layer`.
+    pub fn api_route_layer<L>(self, layer: L) -> Self
     where
         L: Layer<Route> + Clone + Send + Sync + 'static,
         L::Service: Service<Request<Body>> + Clone + Send + Sync + 'static,
