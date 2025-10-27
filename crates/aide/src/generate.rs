@@ -134,11 +134,11 @@ impl GenContext {
             }
         }
 
-        let schema_settings = SchemaSettings::draft07();
+        let schema_settings = SchemaSettings::openapi3();
 
         let mut this = Self {
-            input_generator: SchemaGenerator::new(SchemaSettings::openapi3().for_deserialize()),
-            output_generator: SchemaGenerator::new(SchemaSettings::openapi3().for_serialize()),
+            input_generator: SchemaGenerator::new(schema_settings.clone().for_deserialize()),
+            output_generator: SchemaGenerator::new(schema_settings.for_serialize()),
             infer_responses: true,
             all_error_responses: false,
             extract_schemas: true,
@@ -155,13 +155,15 @@ impl GenContext {
     }
     fn set_extract_schemas(&mut self, extract: bool) {
         if extract {
-            let settings = SchemaSettings::openapi3();
+            let settings = self.input_generator.settings().clone().with(|s| {
+                s.inline_subschemas = false;
+            });
 
             self.input_generator = SchemaGenerator::new(settings.clone().for_deserialize());
             self.output_generator = SchemaGenerator::new(settings.for_serialize());
             self.extract_schemas = true;
         } else {
-            let settings = SchemaSettings::openapi3().with(|s| {
+            let settings = self.input_generator.settings().clone().with(|s| {
                 s.inline_subschemas = true;
             });
 

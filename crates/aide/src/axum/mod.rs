@@ -400,6 +400,49 @@ where
         self
     }
 
+    /// Add a layer to all routes in this router and
+    /// include its effects in the API documentation.
+    pub fn api_layer<L, I, O>(self, layer: L) -> Self
+    where
+        L: Layer<Route> + Clone + Send + Sync + 'static,
+        L::Service: Service<Request<Body>> + Clone + Send + Sync + 'static,
+        <L::Service as Service<Request<Body>>>::Response: IntoResponse + 'static,
+        <L::Service as Service<Request<Body>>>::Error: Into<Infallible> + 'static,
+        <L::Service as Service<Request<Body>>>::Future: Send + 'static,
+        L: OperationHandler<I, O> + 'static,
+        I: OperationInput + 'static,
+        O: OperationOutput + 'static,
+    {
+        self.route_layer(layer)
+            .with_path_items(|mut transform_path_item| {
+                let path_item = transform_path_item.inner_mut();
+
+                in_context(|ct| {
+                    macro_rules! apply_error {
+                        ($op:ident) => {
+                            if let Some(op) = path_item.$op.as_mut() {
+                                I::inferred_early_responses(ct, op);
+                                I::operation_input(ct, op);
+                                O::operation_response(ct, op);
+                                O::inferred_responses(ct, op);
+                            };
+                        };
+                    }
+
+                    apply_error!(get);
+                    apply_error!(put);
+                    apply_error!(post);
+                    apply_error!(delete);
+                    apply_error!(options);
+                    apply_error!(head);
+                    apply_error!(patch);
+                    apply_error!(trace);
+                });
+
+                transform_path_item
+            })
+    }
+
     /// Turn this router into an [`axum::Router`] while merging
     /// generated documentation into the provided [`OpenApi`].
     #[tracing::instrument(skip_all)]
