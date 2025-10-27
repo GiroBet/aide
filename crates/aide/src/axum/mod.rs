@@ -405,6 +405,7 @@ where
     ///
     /// This is especially useful for layers such as for authentication, which
     /// may return early responses (e.g., 401 Unauthorized) or modify operation inputs.
+    /// See [`axum::Router::layer`] for details.
     pub fn api_layer<L>(self, layer: L) -> Self
     where
         L: Layer<Route> + Clone + Send + Sync + 'static,
@@ -449,6 +450,7 @@ where
     /// may return early responses (e.g., 401 Unauthorized) or modify operation inputs.
     ///
     /// This is the `route_layer` equivalent of `api_layer`.
+    /// See [`axum::Router::route_layer`] for details.
     pub fn api_route_layer<L>(self, layer: L) -> Self
     where
         L: Layer<Route> + Clone + Send + Sync + 'static,
