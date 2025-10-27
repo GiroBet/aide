@@ -402,16 +402,14 @@ where
 
     /// Add a layer to all routes in this router and
     /// include its effects in the API documentation.
-    pub fn api_layer<L, I, O>(self, layer: L) -> Self
+    pub fn api_layer<L>(self, layer: L) -> Self
     where
         L: Layer<Route> + Clone + Send + Sync + 'static,
         L::Service: Service<Request<Body>> + Clone + Send + Sync + 'static,
         <L::Service as Service<Request<Body>>>::Response: IntoResponse + 'static,
         <L::Service as Service<Request<Body>>>::Error: Into<Infallible> + 'static,
         <L::Service as Service<Request<Body>>>::Future: Send + 'static,
-        L: OperationHandler<I, O> + 'static,
-        I: OperationInput + 'static,
-        O: OperationOutput + 'static,
+        L: OperationInput + 'static,
     {
         self.route_layer(layer)
             .with_path_items(|mut transform_path_item| {
@@ -421,10 +419,8 @@ where
                     macro_rules! apply_error {
                         ($op:ident) => {
                             if let Some(op) = path_item.$op.as_mut() {
-                                I::inferred_early_responses(ct, op);
-                                I::operation_input(ct, op);
-                                O::operation_response(ct, op);
-                                O::inferred_responses(ct, op);
+                                L::inferred_early_responses(ct, op);
+                                L::operation_input(ct, op);
                             };
                         };
                     }
