@@ -172,7 +172,7 @@ use std::{convert::Infallible, future::Future, iter::Map, pin::Pin};
 
 use crate::{
     generate::{self, in_context},
-    openapi::{OpenApi, PathItem, ReferenceOr, SchemaObject},
+    openapi::{OpenApi, PathItem, ReferenceOr},
     operation::OperationHandler,
     util::{merge_paths, path_for_nested_route},
     OperationInput, OperationOutput,
@@ -547,24 +547,27 @@ where
                 return false;
             }
 
-            let mut definitions = ctx.input_generator.take_definitions(true);
-            definitions.extend(ctx.output_generator.take_definitions(true));
+            let input_name_ids = ctx
+                .input_generator
+                .schema_names_to_ids()
+                .map(|(name, id)| (name.to_owned(), id.to_owned()))
+                .collect::<Vec<_>>();
+            let output_name_ids = ctx
+                .output_generator
+                .schema_names_to_ids()
+                .map(|(name, id)| (name.to_owned(), id.to_owned()))
+                .collect::<Vec<_>>();
 
-            let mapped_definitions = definitions.into_iter().map(|(name, json_schema)| {
-                (
-                    name,
-                    SchemaObject {
-                        json_schema: json_schema.try_into().expect("Invalid schema"),
-                        example: None,
-                        external_docs: None,
-                    },
-                )
-            });
+            let input_defs = ctx.input_generator.take_definitions(true);
+            let output_defs = ctx.output_generator.take_definitions(true);
 
-            api.components
-                .get_or_insert_with(Default::default)
-                .schemas
-                .extend(mapped_definitions);
+            crate::transform::reconcile_contracts(
+                api,
+                input_defs,
+                output_defs,
+                input_name_ids,
+                output_name_ids,
+            );
 
             true
         });
@@ -1107,5 +1110,367 @@ mod tests {
             "/test-route",
             routing::get(test_handler3.layer(tower_layer::Identity::new())),
         );
+    }
+
+    #[cfg(feature = "axum-json")]
+    #[test]
+    fn divergent_type_gets_separate_output_schema() {
+        use crate::openapi::OpenApi;
+        use axum::Json;
+        use schemars::JsonSchema;
+        use serde::{Deserialize, Serialize};
+
+        #[derive(Serialize, Deserialize, JsonSchema)]
+        #[allow(dead_code)]
+        struct Rating {
+            rating: Option<i64>,
+        }
+
+        async fn roundtrip(Json(r): Json<Rating>) -> Json<Rating> {
+            Json(r)
+        }
+
+        let mut api = OpenApi::default();
+        let _: axum::Router = ApiRouter::new()
+            .api_route("/rating", routing::post(roundtrip))
+            .finish_api(&mut api);
+
+        let doc = serde_json::to_value(&api).unwrap();
+        let schemas = &doc["components"]["schemas"];
+
+        // Request keeps the deserialize contract under the bare name: `rating` is optional.
+        assert!(
+            schemas["Rating"]["required"]
+                .as_array()
+                .is_none_or(|req| !req.iter().any(|v| v == "rating")),
+            "deserialize `Rating.rating` must NOT be required, got {}",
+            schemas["Rating"]
+        );
+        // Response gets the serialize contract under `RatingOutput`: `rating` is always present.
+        assert!(
+            schemas["RatingOutput"]["required"]
+                .as_array()
+                .is_some_and(|req| req.iter().any(|v| v == "rating")),
+            "serialize `RatingOutput.rating` must be required, got {}",
+            schemas["RatingOutput"]
+        );
+
+        assert_eq!(
+            doc["paths"]["/rating"]["post"]["requestBody"]["content"]["application/json"]["schema"]
+                ["$ref"],
+            "#/components/schemas/Rating",
+        );
+        assert_eq!(
+            doc["paths"]["/rating"]["post"]["responses"]["200"]["content"]["application/json"]
+                ["schema"]["$ref"],
+            "#/components/schemas/RatingOutput",
+        );
+    }
+
+    #[cfg(feature = "axum-json")]
+    fn schema_ref_name(schema: &serde_json::Value) -> &str {
+        schema["$ref"]
+            .as_str()
+            .unwrap_or_else(|| panic!("expected a $ref, got {schema}"))
+            .rsplit('/')
+            .next()
+            .unwrap()
+    }
+
+    #[cfg(feature = "axum-json")]
+    #[test]
+    fn identical_type_is_shared_without_output_schema() {
+        use crate::openapi::OpenApi;
+        use axum::Json;
+        use schemars::JsonSchema;
+        use serde::{Deserialize, Serialize};
+
+        #[derive(Serialize, Deserialize, JsonSchema)]
+        #[allow(dead_code)]
+        struct Plain {
+            a: i64,
+            b: String,
+        }
+
+        async fn roundtrip(Json(p): Json<Plain>) -> Json<Plain> {
+            Json(p)
+        }
+
+        let mut api = OpenApi::default();
+        let _: axum::Router = ApiRouter::new()
+            .api_route("/plain", routing::post(roundtrip))
+            .finish_api(&mut api);
+
+        let doc = serde_json::to_value(&api).unwrap();
+        let schemas = &doc["components"]["schemas"];
+
+        assert!(schemas.get("Plain").is_some(), "{schemas}");
+        assert!(
+            schemas.get("PlainOutput").is_none(),
+            "identical contracts must not duplicate: {schemas}"
+        );
+        assert_eq!(
+            schema_ref_name(
+                &doc["paths"]["/plain"]["post"]["requestBody"]["content"]["application/json"]
+                    ["schema"]
+            ),
+            "Plain"
+        );
+        assert_eq!(
+            schema_ref_name(
+                &doc["paths"]["/plain"]["post"]["responses"]["200"]["content"]["application/json"]
+                    ["schema"]
+            ),
+            "Plain"
+        );
+    }
+
+    #[cfg(feature = "axum-json")]
+    #[test]
+    fn transitivity_duplicates_outer_when_inner_diverges() {
+        use crate::openapi::OpenApi;
+        use axum::Json;
+        use schemars::JsonSchema;
+        use serde::{Deserialize, Serialize};
+
+        #[derive(Serialize, Deserialize, JsonSchema)]
+        #[allow(dead_code)]
+        struct Inner {
+            rating: Option<i64>,
+        }
+        #[derive(Serialize, Deserialize, JsonSchema)]
+        #[allow(dead_code)]
+        struct Outer {
+            inner: Inner,
+        }
+
+        async fn roundtrip(Json(o): Json<Outer>) -> Json<Outer> {
+            Json(o)
+        }
+
+        let mut api = OpenApi::default();
+        let _: axum::Router = ApiRouter::new()
+            .api_route("/outer", routing::post(roundtrip))
+            .finish_api(&mut api);
+
+        let doc = serde_json::to_value(&api).unwrap();
+        let schemas = &doc["components"]["schemas"];
+
+        for key in ["Inner", "InnerOutput", "Outer", "OuterOutput"] {
+            assert!(schemas.get(key).is_some(), "missing {key}: {schemas}");
+        }
+        // Outer is byte-identical across contracts, yet must still be duplicated because its
+        // child Inner diverges — the request Outer references the deserialize Inner, the response
+        // OuterOutput references the serialize InnerOutput.
+        assert_eq!(
+            schema_ref_name(&schemas["Outer"]["properties"]["inner"]),
+            "Inner"
+        );
+        assert_eq!(
+            schema_ref_name(&schemas["OuterOutput"]["properties"]["inner"]),
+            "InnerOutput"
+        );
+        assert_eq!(
+            schema_ref_name(
+                &doc["paths"]["/outer"]["post"]["requestBody"]["content"]["application/json"]
+                    ["schema"]
+            ),
+            "Outer"
+        );
+        assert_eq!(
+            schema_ref_name(
+                &doc["paths"]["/outer"]["post"]["responses"]["200"]["content"]["application/json"]
+                    ["schema"]
+            ),
+            "OuterOutput"
+        );
+    }
+
+    #[cfg(feature = "axum-json")]
+    #[test]
+    fn recursive_identical_type_is_shared() {
+        use crate::openapi::OpenApi;
+        use axum::Json;
+        use schemars::JsonSchema;
+        use serde::{Deserialize, Serialize};
+
+        #[derive(Serialize, Deserialize, JsonSchema)]
+        #[allow(dead_code)]
+        struct Tree {
+            children: Vec<Tree>,
+        }
+
+        async fn roundtrip(Json(t): Json<Tree>) -> Json<Tree> {
+            Json(t)
+        }
+
+        let mut api = OpenApi::default();
+        let _: axum::Router = ApiRouter::new()
+            .api_route("/tree", routing::post(roundtrip))
+            .finish_api(&mut api);
+
+        let doc = serde_json::to_value(&api).unwrap();
+        let schemas = &doc["components"]["schemas"];
+
+        assert!(schemas.get("Tree").is_some(), "{schemas}");
+        assert!(schemas.get("TreeOutput").is_none(), "{schemas}");
+        assert_eq!(
+            schema_ref_name(&schemas["Tree"]["properties"]["children"]["items"]),
+            "Tree"
+        );
+    }
+
+    #[cfg(feature = "axum-json")]
+    #[test]
+    fn recursive_divergent_type_duplicates_whole_cycle() {
+        use crate::openapi::OpenApi;
+        use axum::Json;
+        use schemars::JsonSchema;
+        use serde::{Deserialize, Serialize};
+
+        #[derive(Serialize, Deserialize, JsonSchema)]
+        #[allow(dead_code)]
+        struct RTree {
+            v: Option<i64>,
+            children: Vec<RTree>,
+        }
+
+        async fn roundtrip(Json(t): Json<RTree>) -> Json<RTree> {
+            Json(t)
+        }
+
+        let mut api = OpenApi::default();
+        let _: axum::Router = ApiRouter::new()
+            .api_route("/rtree", routing::post(roundtrip))
+            .finish_api(&mut api);
+
+        let doc = serde_json::to_value(&api).unwrap();
+        let schemas = &doc["components"]["schemas"];
+
+        assert!(schemas.get("RTree").is_some(), "{schemas}");
+        assert!(schemas.get("RTreeOutput").is_some(), "{schemas}");
+        // The serialize copy's self-reference must stay inside the serialize copy.
+        assert_eq!(
+            schema_ref_name(&schemas["RTree"]["properties"]["children"]["items"]),
+            "RTree"
+        );
+        assert_eq!(
+            schema_ref_name(&schemas["RTreeOutput"]["properties"]["children"]["items"]),
+            "RTreeOutput"
+        );
+    }
+
+    #[cfg(feature = "axum-json")]
+    #[test]
+    fn response_only_divergent_type_keeps_bare_name() {
+        use crate::openapi::OpenApi;
+        use axum::Json;
+        use schemars::JsonSchema;
+        use serde::Serialize;
+
+        #[derive(Serialize, JsonSchema)]
+        #[allow(dead_code)]
+        struct OnlyResp {
+            rating: Option<i64>,
+        }
+
+        async fn handler() -> Json<OnlyResp> {
+            Json(OnlyResp { rating: None })
+        }
+
+        let mut api = OpenApi::default();
+        let _: axum::Router = ApiRouter::new()
+            .api_route("/only", routing::get(handler))
+            .finish_api(&mut api);
+
+        let doc = serde_json::to_value(&api).unwrap();
+        let schemas = &doc["components"]["schemas"];
+
+        // No request counterpart, so no collision and no suffix.
+        assert!(schemas.get("OnlyResp").is_some(), "{schemas}");
+        assert!(schemas.get("OnlyRespOutput").is_none(), "{schemas}");
+        assert!(
+            schemas["OnlyResp"]["required"]
+                .as_array()
+                .is_some_and(|req| req.iter().any(|v| v == "rating")),
+            "serialize contract should mark rating required: {schemas}"
+        );
+        assert_eq!(
+            schema_ref_name(
+                &doc["paths"]["/only"]["get"]["responses"]["200"]["content"]["application/json"]
+                    ["schema"]
+            ),
+            "OnlyResp"
+        );
+    }
+
+    #[cfg(feature = "axum-json")]
+    #[test]
+    fn generic_instantiations_are_not_cross_wired() {
+        use crate::openapi::OpenApi;
+        use axum::Json;
+        use schemars::JsonSchema;
+        use serde::{Deserialize, Serialize};
+
+        #[derive(Serialize, Deserialize, JsonSchema)]
+        #[allow(dead_code)]
+        struct Apple {
+            apple: i64,
+        }
+        #[derive(Serialize, Deserialize, JsonSchema)]
+        #[allow(dead_code)]
+        struct Banana {
+            banana: String,
+        }
+        #[derive(Serialize, Deserialize, JsonSchema)]
+        #[allow(dead_code)]
+        struct W<T> {
+            inner: T,
+        }
+
+        async fn one(Json(w): Json<W<Apple>>) -> Json<W<Banana>> {
+            let _ = w;
+            Json(W {
+                inner: Banana {
+                    banana: String::new(),
+                },
+            })
+        }
+        async fn two(Json(w): Json<W<Banana>>) -> Json<W<Apple>> {
+            let _ = w;
+            Json(W {
+                inner: Apple { apple: 0 },
+            })
+        }
+
+        let mut api = OpenApi::default();
+        let _: axum::Router = ApiRouter::new()
+            .api_route("/one", routing::post(one))
+            .api_route("/two", routing::post(two))
+            .finish_api(&mut api);
+
+        let doc = serde_json::to_value(&api).unwrap();
+        let schemas = &doc["components"]["schemas"];
+
+        // `W<Apple>` and `W<Banana>` share the schema name "W"; joining by name (rather than by
+        // schema id) would compare them and cross-wire the responses. Each response must describe
+        // the wrapper of the type it actually returns.
+        let resolve_inner = |op_path: &str| -> String {
+            let wrapper = schema_ref_name(
+                &doc["paths"][op_path]["post"]["responses"]["200"]["content"]["application/json"]
+                    ["schema"],
+            )
+            .to_owned();
+            let inner = schema_ref_name(&schemas[&wrapper]["properties"]["inner"]).to_owned();
+            // Return the distinguishing property name of the inner schema.
+            schemas[&inner]["properties"]
+                .as_object()
+                .and_then(|p| p.keys().next())
+                .cloned()
+                .unwrap_or_default()
+        };
+
+        assert_eq!(resolve_inner("/one"), "banana", "/one returns W<Banana>");
+        assert_eq!(resolve_inner("/two"), "apple", "/two returns W<Apple>");
     }
 }

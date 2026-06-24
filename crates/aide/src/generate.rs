@@ -8,6 +8,14 @@ use serde_json::Value;
 
 use crate::error::Error;
 
+/// Temporary definitions path for the output (serialize) generator so its `$ref`s are
+/// distinguishable from input ones during reconciliation. Rewritten to `#/components/schemas/...`
+/// before emission, so it never appears in the final document.
+pub(crate) const OUTPUT_DEFS_PATH: &str = "/components/output";
+
+/// Suffix for a response schema whose serialize form diverges from the request's deserialize form.
+pub(crate) const OUTPUT_SCHEMA_SUFFIX: &str = "Output";
+
 thread_local! {
     static GEN_CTX: RefCell<GenContext> = RefCell::new(GenContext::new());
 }
@@ -172,12 +180,15 @@ impl GenContext {
     }
     fn set_extract_schemas(&mut self, extract: bool) {
         if extract {
-            let settings = self.input_generator.settings().clone().with(|s| {
+            let input_settings = self.input_generator.settings().clone().with(|s| {
                 s.inline_subschemas = false;
             });
+            let output_settings = input_settings.clone().with(|s| {
+                s.definitions_path = OUTPUT_DEFS_PATH.into();
+            });
 
-            self.input_generator = SchemaGenerator::new(settings.clone().for_deserialize());
-            self.output_generator = SchemaGenerator::new(settings.for_serialize());
+            self.input_generator = SchemaGenerator::new(input_settings.for_deserialize());
+            self.output_generator = SchemaGenerator::new(output_settings.for_serialize());
             self.extract_schemas = true;
         } else {
             let settings = self.input_generator.settings().clone().with(|s| {
@@ -247,9 +258,12 @@ fn extract_schema_by_ref<'s>(
     schema_or_ref: &'s Schema,
 ) -> Option<&'s Schema> {
     match &schema_or_ref.as_object().and_then(|o| o.get("$ref")) {
+        // The name is the last segment of the ref, regardless of whether the
+        // generator emits under `#/components/schemas/` (input) or the temporary
+        // `#/components/output/` (output) path.
         Some(Value::String(r)) => generator
             .definitions()
-            .get(r.strip_prefix("#/components/schemas/").unwrap_or(r))
+            .get(r.rsplit('/').next().unwrap_or(r))
             .and_then(|s| Into::<serde_json::Result<&Schema>>::into(s.try_into()).ok()),
         _ => None,
     }
