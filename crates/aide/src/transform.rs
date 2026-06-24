@@ -1497,8 +1497,11 @@ pub(crate) fn reconcile_contracts(
         (Some((_, a)), Some((_, b))) => canonicalize(a, &ref_to_id) == canonicalize(b, &ref_to_id),
         _ => false,
     };
-    let mut shareable: BTreeSet<String> =
-        all_ids.iter().filter(|id| local_equal(id)).cloned().collect();
+    let mut shareable: BTreeSet<String> = all_ids
+        .iter()
+        .filter(|id| local_equal(id))
+        .cloned()
+        .collect();
     let mut worklist: Vec<String> = shareable.iter().cloned().collect();
     while let Some(id) = worklist.pop() {
         if !shareable.contains(&id) {
