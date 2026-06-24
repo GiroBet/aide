@@ -538,6 +538,11 @@ where
         let _ = transform(TransformOpenApi::new(api));
 
         let needs_reset = in_context(|ctx| {
+            // Strip null types from query parameters if enabled
+            if ctx.strip_query_null_types {
+                crate::transform::strip_null_from_query_params_impl(api);
+            }
+
             if !ctx.extract_schemas {
                 return false;
             }
@@ -573,6 +578,7 @@ where
     /// This method allows you to add OpenAPI documentation to routes that have been
     /// previously defined using `Router` methods, particularly useful when working
     /// with frameworks like Leptos that only implement traits for `axum::Router`.
+    #[expect(clippy::needless_pass_by_value)]
     pub fn api_route_docs(mut self, path: &str, docs: routing::ApiMethodDocs) -> Self {
         in_context(|_ctx| {
             if let Some(path_item) = self.paths.get_mut(path) {
@@ -592,6 +598,7 @@ where
     /// This method allows you to add OpenAPI documentation to routes that have been
     /// previously defined using `Router` methods, and additionally provides a transform
     /// function to edit the generated path item.
+    #[expect(clippy::needless_pass_by_value)]
     pub fn api_route_docs_with(
         mut self,
         path: &str,
@@ -987,6 +994,46 @@ mod tests {
     async fn test_handler2(State(_): State<u8>) {}
 
     async fn test_handler3() {}
+
+    #[cfg(feature = "axum-json")]
+    #[test]
+    fn inferred_early_responses_for_json_are_documented() {
+        use crate::{generate, openapi::Operation, OperationInput};
+        use axum::Json;
+        use schemars::JsonSchema;
+        use serde::Deserialize;
+
+        #[derive(Deserialize, JsonSchema)]
+        struct Example {
+            value: usize,
+        }
+
+        generate::in_context(|ctx| {
+            let mut operation = Operation::default();
+
+            // Read a field so `dead_code` doesn't warn on this test-only type.
+            let example = Example { value: 0 };
+            let _ = example.value;
+
+            let responses =
+                <Json<Example> as OperationInput>::inferred_early_responses(ctx, &mut operation);
+
+            let mut codes = responses
+                .into_iter()
+                .map(|(code, _)| code.expect("status code"))
+                .collect::<Vec<_>>();
+            codes.sort_by_key(ToString::to_string);
+
+            assert_eq!(
+                codes,
+                vec![
+                    crate::openapi::StatusCode::Code(400),
+                    crate::openapi::StatusCode::Code(415),
+                    crate::openapi::StatusCode::Code(422),
+                ]
+            );
+        });
+    }
 
     fn nested_route() -> ApiRouter {
         ApiRouter::new()

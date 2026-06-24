@@ -11,7 +11,7 @@
 //! See the [examples](https://github.com/tamasfe/aide/tree/master/examples)
 //! to see how Aide is used with various frameworks.
 //!
-//! Currently only Open API version `3.1.0` is supported.
+//! Currently only Open API version `3.1.x` is supported.
 //!
 //! Previous releases of aide relied heavily on macros, and the
 //! [`linkme`](https://docs.rs/linkme/latest/linkme/) crate for automagic global state.
@@ -113,7 +113,7 @@
 //! The library will always support the latest stable Rust version,
 //! it might support older versions but without guarantees.
 //!
-#![cfg_attr(docsrs, feature(doc_auto_cfg))]
+#![cfg_attr(docsrs, feature(doc_cfg))]
 #![warn(clippy::pedantic, missing_docs, unreachable_pub, rust_2018_idioms)]
 #![allow(
     clippy::default_trait_access,
@@ -124,6 +124,11 @@
     clippy::single_match_else,
     clippy::manual_let_else
 )]
+
+// Required for using macros such as the `OperationIo` derive macro in tests.
+// These macros use paths starting with `aide::` which would otherwise be invalid within this crate.
+#[cfg(test)]
+extern crate self as aide;
 
 #[macro_use]
 mod macros;
