@@ -106,7 +106,7 @@ mod serde_version {
         _: &Cow<'static, str>,
         ser: S,
     ) -> Result<S::Ok, S::Error> {
-        Cow::Borrowed("3.1.0").serialize(ser)
+        Cow::Borrowed("3.1.2").serialize(ser)
     }
 
     pub(super) fn deserialize<'de, D: Deserializer<'de>>(
@@ -115,7 +115,7 @@ mod serde_version {
         // Accept any patch version of 3.1.x.
         <&'de str>::deserialize(de).and_then(|s| {
             if s.starts_with("3.1.") {
-                Ok(Cow::Owned("3.1.0".to_owned()))
+                Ok(Cow::Owned("3.1.2".to_owned()))
             } else {
                 Err(serde::de::Error::custom("expected 3.1.x"))
             }
@@ -130,12 +130,20 @@ mod tests {
     #[test]
     fn test_default_openapi_deserialize() {
         let mut api = OpenApi::default();
-        api.openapi = std::borrow::Cow::Borrowed("3.1.0");
+        api.openapi = std::borrow::Cow::Borrowed("3.1.2");
 
         let json = serde_json::to_string(&api).unwrap();
 
         let deser_api = serde_json::from_str::<OpenApi>(&json).unwrap();
 
         assert_eq!(api, deser_api);
+    }
+
+    #[test]
+    fn default_openapi_serializes_version_3_1_2() {
+        assert_eq!(
+            serde_json::to_value(OpenApi::default()).unwrap()["openapi"],
+            "3.1.2"
+        );
     }
 }

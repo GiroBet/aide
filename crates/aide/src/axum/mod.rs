@@ -1168,6 +1168,69 @@ mod tests {
     }
 
     #[cfg(feature = "axum-json")]
+    #[test]
+    fn optional_fields_are_type_arrays_without_nullable() {
+        use crate::openapi::OpenApi;
+        use axum::Json;
+        use schemars::JsonSchema;
+        use serde::{Deserialize, Serialize};
+
+        #[derive(Serialize, Deserialize, JsonSchema)]
+        #[allow(dead_code)]
+        struct Thing {
+            note: Option<String>,
+        }
+
+        async fn echo(Json(t): Json<Thing>) -> Json<Thing> {
+            Json(t)
+        }
+
+        let mut api = OpenApi::default();
+        let _: axum::Router = ApiRouter::new()
+            .api_route("/t", routing::post(echo))
+            .finish_api(&mut api);
+
+        let doc = serde_json::to_value(&api).unwrap();
+        let note = &doc["components"]["schemas"]["Thing"]["properties"]["note"];
+        assert_eq!(note["type"], serde_json::json!(["string", "null"]));
+        assert!(!doc.to_string().contains("\"nullable\""));
+    }
+
+    #[cfg(feature = "axum-json")]
+    #[test]
+    fn a_tagged_enum_keeps_const_tags() {
+        use crate::openapi::OpenApi;
+        use axum::Json;
+        use schemars::JsonSchema;
+        use serde::{Deserialize, Serialize};
+
+        #[derive(Serialize, Deserialize, JsonSchema)]
+        #[serde(tag = "kind")]
+        #[allow(dead_code)]
+        enum Shape {
+            Dot,
+            Line { length: u32 },
+        }
+
+        async fn echo(Json(s): Json<Shape>) -> Json<Shape> {
+            Json(s)
+        }
+
+        let mut api = OpenApi::default();
+        let _: axum::Router = ApiRouter::new()
+            .api_route("/s", routing::post(echo))
+            .finish_api(&mut api);
+
+        let doc = serde_json::to_value(&api).unwrap();
+        let variants = &doc["components"]["schemas"]["Shape"]["oneOf"];
+        assert_eq!(
+            variants[0]["properties"]["kind"],
+            serde_json::json!({"type": "string", "const": "Dot"})
+        );
+        assert!(!doc.to_string().contains("\"enum\""));
+    }
+
+    #[cfg(feature = "axum-json")]
     fn schema_ref_name(schema: &serde_json::Value) -> &str {
         schema["$ref"]
             .as_str()
