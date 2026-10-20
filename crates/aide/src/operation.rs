@@ -520,4 +520,31 @@ mod tests {
         fn assert_impls_operation_input_output<T: OperationInput + OperationOutput>() {}
         assert_impls_operation_input_output::<OperationInputOutput<(), i32>>();
     }
+
+    #[test]
+    fn an_optional_login_documents_an_anonymous_alternative() {
+        use crate::openapi::SecurityRequirement;
+        use indexmap::IndexMap;
+
+        struct Login;
+        impl OperationInput for Login {
+            fn operation_input(_ctx: &mut GenContext, operation: &mut Operation) {
+                operation
+                    .security
+                    .push(IndexMap::from([("bearerAuth".to_string(), vec![])]));
+            }
+        }
+
+        let bearer: SecurityRequirement = IndexMap::from([("bearerAuth".to_string(), vec![])]);
+
+        generate::in_context(|ctx| {
+            let mut required = Operation::default();
+            Login::operation_input(ctx, &mut required);
+            assert_eq!(required.security, vec![bearer.clone()]);
+
+            let mut optional = Operation::default();
+            Option::<Login>::operation_input(ctx, &mut optional);
+            assert_eq!(optional.security, vec![bearer.clone(), IndexMap::new()]);
+        });
+    }
 }

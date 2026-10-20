@@ -1,7 +1,7 @@
 use std::{borrow::Cow, convert::Infallible, rc::Rc, sync::Arc};
 
 use crate::{
-    openapi::{MediaType, Operation, RequestBody, Response, StatusCode},
+    openapi::{MediaType, Operation, RequestBody, Response, SecurityRequirement, StatusCode},
     operation::set_body,
     util::no_content_response,
     OperationInput,
@@ -68,7 +68,12 @@ where
         // TODO: we should probably do this for the body as well.
         let mut temp_op = Operation::default();
         T::operation_input(ctx, &mut temp_op);
+        let security_before = operation.security.len();
         T::operation_input(ctx, operation);
+
+        if operation.security.len() > security_before {
+            operation.security.push(SecurityRequirement::new());
+        }
 
         if temp_op.parameters.is_empty() {
             return;
