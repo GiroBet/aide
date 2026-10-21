@@ -158,7 +158,10 @@ impl GenContext {
             }
         }
 
-        let schema_settings = SchemaSettings::openapi3();
+        let schema_settings = SchemaSettings::draft2020_12().with(|s| {
+            s.definitions_path = "/components/schemas".into();
+            s.meta_schema = None;
+        });
 
         let mut this = Self {
             input_generator: SchemaGenerator::new(schema_settings.clone().for_deserialize()),
