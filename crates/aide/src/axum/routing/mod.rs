@@ -362,6 +362,14 @@ where
             operations: self.operations,
         }
     }
+
+    /// Applies `transform` to every operation this method router documents.
+    pub fn with_operations(mut self, mut transform: impl FnMut(&mut Operation)) -> Self {
+        for op in self.operations.values_mut() {
+            transform(op);
+        }
+        self
+    }
 }
 
 impl<S, E> Default for ApiMethodRouter<S, E>
@@ -381,3 +389,25 @@ method_router_top_level!(patch, patch_with);
 method_router_top_level!(post, post_with);
 method_router_top_level!(put, put_with);
 method_router_top_level!(trace, trace_with);
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn with_operations_reaches_every_method() {
+        async fn handler() {}
+        let router: ApiMethodRouter<()> = get_with(handler, |op| op.id("read"))
+            .merge(post_with(handler, |op| op.id("write")))
+            .with_operations(|op| {
+                op.extensions
+                    .insert("x-seen".into(), serde_json::Value::Bool(true));
+            });
+        assert_eq!(router.operations.len(), 2);
+        assert!(router
+            .operations
+            .values()
+            .all(|op| op.extensions.get("x-seen") == Some(&serde_json::Value::Bool(true))));
+        let _: ApiMethodRouter<()> = ApiMethodRouter::new().with_operations(|_| unreachable!());
+    }
+}
